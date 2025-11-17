@@ -1,6 +1,10 @@
 import os
-from fastapi import FastAPI
+from typing import List, Optional
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from bson import ObjectId
 
 app = FastAPI()
 
@@ -12,6 +16,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ---------- Helpers ----------
+class BookOut(BaseModel):
+    id: str
+    title: str
+    subtitle: Optional[str] = None
+    description: str
+    cover_url: Optional[str] = None
+    buy_link: Optional[str] = None
+    tags: List[str] = []
+    featured: bool = False
+
+class LoreOut(BaseModel):
+    id: str
+    title: str
+    region: Optional[str] = None
+    excerpt: Optional[str] = None
+    content: str
+    image_url: Optional[str] = None
+    tags: List[str] = []
+
+class PostOut(BaseModel):
+    id: str
+    title: str
+    excerpt: Optional[str] = None
+    content: str
+    cover_url: Optional[str] = None
+    author: Optional[str] = None
+    tags: List[str] = []
+    published: bool = True
+
+
+def _doc_to_model(doc) -> dict:
+    if not doc:
+        return {}
+    d = dict(doc)
+    _id = d.pop("_id", None)
+    if isinstance(_id, ObjectId):
+        d["id"] = str(_id)
+    else:
+        d["id"] = str(_id) if _id is not None else ""
+    # Remove internal timestamps from response if present
+    d.pop("created_at", None)
+    d.pop("updated_at", None)
+    return d
+
+
 @app.get("/")
 def read_root():
     return {"message": "Hello from FastAPI Backend!"}
@@ -19,6 +70,45 @@ def read_root():
 @app.get("/api/hello")
 def hello():
     return {"message": "Hello from the backend API!"}
+
+
+@app.get("/api/books", response_model=List[BookOut])
+def list_books(featured: Optional[bool] = Query(None), limit: int = Query(12, ge=1, le=50)):
+    try:
+        from database import db
+        if db is None:
+            return []
+        query = {}
+        if featured is not None:
+            query["featured"] = featured
+        cursor = db["book"].find(query).sort("created_at", -1).limit(limit)
+        return [_doc_to_model(doc) for doc in cursor]
+    except Exception:
+        return []
+
+@app.get("/api/lore", response_model=List[LoreOut])
+def list_lore(limit: int = Query(6, ge=1, le=50)):
+    try:
+        from database import db
+        if db is None:
+            return []
+        cursor = db["lore"].find({}).sort("created_at", -1).limit(limit)
+        return [_doc_to_model(doc) for doc in cursor]
+    except Exception:
+        return []
+
+@app.get("/api/posts", response_model=List[PostOut])
+def list_posts(published: bool = Query(True), limit: int = Query(3, ge=1, le=50)):
+    try:
+        from database import db
+        if db is None:
+            return []
+        query = {"published": published}
+        cursor = db["post"].find(query).sort("created_at", -1).limit(limit)
+        return [_doc_to_model(doc) for doc in cursor]
+    except Exception:
+        return []
+
 
 @app.get("/test")
 def test_database():
